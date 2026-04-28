@@ -5,16 +5,35 @@ from datetime import datetime
 from typing import Optional, Dict, List
 import google.generativeai as genai
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables dari .env file
+load_dotenv()
 
 
 class GeminiConfig:
     """Configuration untuk Gemini API"""
     def __init__(self, api_key: Optional[str] = None):
+        # Try: parameter -> .env file -> environment variable
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        
         if not self.api_key:
-            raise ValueError("GEMINI_API_KEY tidak ditemukan. Silakan set environment variable atau pass api_key.")
-        genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel("gemini-pro")
+            raise ValueError(
+                "❌ GEMINI_API_KEY tidak ditemukan.\n\n"
+                "Solusi:\n"
+                "1. Buat file .env di folder project\n"
+                "2. Tambah: GEMINI_API_KEY=your_api_key_here\n"
+                "3. Atau set environment variable:\n"
+                "   Windows: setx GEMINI_API_KEY \"your_api_key_here\"\n"
+                "   Linux/Mac: export GEMINI_API_KEY=\"your_api_key_here\"\n\n"
+                "Dapatkan API key dari: https://aistudio.google.com"
+            )
+        
+        try:
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel("gemini-pro")
+        except Exception as e:
+            raise ValueError(f"❌ Error mengonfigurasi Gemini API: {e}")
     
     def summarize_text(self, text: str, max_length: int = 150) -> str:
         """Merangkum teks menggunakan Gemini API"""
@@ -156,7 +175,7 @@ class ATSOptimizer:
     def remove_special_formatting(text: str) -> str:
         """Hapus formatting khusus yang tidak ATS-friendly"""
         # Hapus simbol khusus kecuali yang umum
-        text = re.sub(r'[^a-zA-Z0-9\s\-().,;:\''"/&@#+%]', '', text)
+        text = re.sub(r'[^a-zA-Z0-9\s\-().,;:\'""/&@#+%]', '', text)
         return text
     
     @staticmethod
