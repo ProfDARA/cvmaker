@@ -10,7 +10,12 @@ from pathlib import Path
 from CVmaker import CVMaker, CVData
 import os
 
-app = Flask(__name__)
+BASE_DIR = Path(__file__).resolve().parent
+app = Flask(
+    __name__,
+    template_folder=str(BASE_DIR / "templates"),
+    static_folder=str(BASE_DIR / "static")
+)
 app.config['JSON_AS_ASCII'] = False
 
 # Initialize CV Maker

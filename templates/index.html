@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CV ATS Maker</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --card: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #38bdf8;
+      --accent-2: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: radial-gradient(circle at top, #1e293b 0%, var(--bg) 50%, #020617 100%);
+      color: var(--text);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .wrap {
+      width: min(960px, 100%);
+      display: grid;
+      gap: 20px;
+    }
+    .hero, .panel {
+      background: rgba(17, 24, 39, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 20px 80px rgba(0,0,0,.35);
+      backdrop-filter: blur(10px);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 4vw, 3.5rem);
+      line-height: 1.05;
+    }
+    p { color: var(--muted); line-height: 1.6; }
+    .grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .item {
+      background: rgba(31, 41, 55, 0.85);
+      border-radius: 16px;
+      padding: 18px;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+    }
+    .item h3 { margin: 0 0 8px; font-size: 1.02rem; }
+    code {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.14);
+      color: #bae6fd;
+      font-size: .92rem;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+      color: var(--accent-2);
+      font-weight: 700;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      box-shadow: 0 0 0 6px rgba(34,197,94,.15);
+    }
+    a.button {
+      display: inline-block;
+      margin-top: 18px;
+      padding: 12px 18px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), #60a5fa);
+      color: white;
+      text-decoration: none;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <h1>CV ATS Maker</h1>
+      <p>
+        Aplikasi untuk membuat CV yang ATS-friendly, merangkum deskripsi kerja,
+        dan mengoptimalkan konten dengan Gemini API.
+      </p>
+      <div class="status"><span class="dot"></span> Flask template berhasil dimuat</div>
+      <a class="button" href="/api/health">Cek Health API</a>
+    </section>
+
+    <section class="panel">
+      <div class="grid">
+        <div class="item">
+          <h3>Summarizer</h3>
+          <p>Gunakan Gemini untuk meringkas pengalaman kerja panjang menjadi lebih singkat dan jelas.</p>
+        </div>
+        <div class="item">
+          <h3>ATS Optimization</h3>
+          <p>Format CV agar lebih mudah dipindai oleh applicant tracking system.</p>
+        </div>
+        <div class="item">
+          <h3>Output</h3>
+          <p>Menyimpan hasil ke <code>TXT</code> dan <code>JSON</code> untuk reuse dan backup.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
