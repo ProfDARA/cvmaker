@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from CVmaker import CVMaker, CVData
 import os
+import tempfile
 
 BASE_DIR = Path(__file__).resolve().parent
 app = Flask(
@@ -19,9 +20,9 @@ app = Flask(
 app.config['JSON_AS_ASCII'] = False
 
 # Initialize CV Maker
+current_cv = CVData()
 try:
     cv_maker = CVMaker()
-    current_cv = CVData()
 except ValueError as e:
     print(f"Error: {e}")
     cv_maker = None
@@ -149,10 +150,42 @@ def save_cv():
     data = request.json
     filename = data.get("filename", "my_cv")
     
-    cv_maker.cv = current_cv
-    cv_maker.save_cv(filename)
+    if cv_maker:
+        cv_maker.cv = current_cv
+        cv_maker.save_cv(filename)
+    else:
+        from CVmaker import CVExporter
+        output_dir = Path("cv_output")
+        output_dir.mkdir(exist_ok=True)
+        CVExporter.export_to_plain_text(current_cv, str(output_dir / f"{filename}.txt"))
+        CVExporter.export_to_json(current_cv, str(output_dir / f"{filename}.json"))
+        CVExporter.export_to_pdf(current_cv, str(output_dir / f"{filename}.pdf"))
     
     return jsonify({"status": "success", "message": f"CV berhasil disimpan: {filename}"})
+
+
+@app.route('/api/cv/export/pdf', methods=['POST'])
+def export_pdf():
+    """Export CV ke PDF dan return file untuk download"""
+    global current_cv, cv_maker
+    data = request.json or {}
+    filename = data.get("filename", "my_cv_ats")
+
+    cv_maker.cv = current_cv
+
+    output_dir = Path(tempfile.gettempdir()) / "cv_ats_maker"
+    output_dir.mkdir(exist_ok=True)
+    pdf_path = output_dir / f"{filename}.pdf"
+
+    from CVmaker import CVExporter
+    CVExporter.export_to_pdf(current_cv, str(pdf_path))
+
+    return send_file(
+        pdf_path,
+        as_attachment=True,
+        download_name=f"{filename}.pdf",
+        mimetype="application/pdf"
+    )
 
 
 @app.route('/api/cv/load', methods=['POST'])
@@ -173,7 +206,30 @@ def load_cv():
 def load_sample():
     """Load sample CV"""
     global current_cv, cv_maker
-    current_cv = cv_maker.create_sample_cv()
+    if cv_maker:
+        current_cv = cv_maker.create_sample_cv()
+    else:
+        sample = CVData()
+        sample.personal_info = {
+            "full_name": "John Doe",
+            "email": "john.doe@email.com",
+            "phone": "+62-812-3456-7890",
+            "location": "Jakarta, Indonesia",
+            "linkedin": "linkedin.com/in/johndoe",
+            "website": "johndoe.com",
+        }
+        sample.professional_summary = "Full Stack Developer dengan pengalaman membangun aplikasi web dan API yang ATS-friendly."
+        sample.add_experience(
+            "Full Stack Developer",
+            "Tech Company",
+            "2022",
+            "Present",
+            "Developed and maintained web applications, improved performance, and collaborated across teams."
+        )
+        sample.add_education("Bachelor of Computer Science", "University", "Computer Science", "2020")
+        for skill in ["Python", "Flask", "JavaScript", "SQL", "Docker"]:
+            sample.add_skill(skill)
+        current_cv = sample
     return jsonify(current_cv.to_dict())
 
 

@@ -6,6 +6,10 @@ from typing import Optional, Dict, List
 import google.generativeai as genai
 from pathlib import Path
 from dotenv import load_dotenv
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 # Load environment variables dari .env file
 load_dotenv()
@@ -215,6 +219,102 @@ class ATSOptimizer:
 
 class CVExporter:
     """Export CV ke berbagai format"""
+
+    @staticmethod
+    def export_to_pdf(cv_data: CVData, output_path: str):
+        """Export ke PDF ATS-friendly standar"""
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=letter,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=36,
+        )
+
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            "CVTitle",
+            parent=styles["Title"],
+            fontName="Helvetica-Bold",
+            fontSize=18,
+            leading=22,
+            spaceAfter=10,
+            alignment=TA_LEFT,
+        )
+        header_style = ParagraphStyle(
+            "CVHeader",
+            parent=styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=11,
+            leading=13,
+            spaceBefore=10,
+            spaceAfter=6,
+            textColor="#111111",
+            alignment=TA_LEFT,
+        )
+        body_style = ParagraphStyle(
+            "CVBody",
+            parent=styles["BodyText"],
+            fontName="Helvetica",
+            fontSize=9.5,
+            leading=13,
+            spaceAfter=4,
+            alignment=TA_LEFT,
+        )
+        small_style = ParagraphStyle(
+            "CVSmall",
+            parent=body_style,
+            fontSize=8.8,
+            leading=11,
+        )
+
+        story = []
+        pi = cv_data.personal_info
+        full_name = pi.get("full_name", "").strip() or "CV ATS Maker"
+        story.append(Paragraph(full_name, title_style))
+
+        contact_parts = [
+            pi.get("email", "").strip(),
+            pi.get("phone", "").strip(),
+            pi.get("location", "").strip(),
+            pi.get("linkedin", "").strip(),
+            pi.get("website", "").strip(),
+        ]
+        contact_text = " | ".join([part for part in contact_parts if part])
+        if contact_text:
+            story.append(Paragraph(contact_text, small_style))
+
+        if cv_data.professional_summary:
+            story.append(Paragraph("Professional Summary", header_style))
+            story.append(Paragraph(cv_data.professional_summary, body_style))
+
+        if cv_data.experience:
+            story.append(Paragraph("Experience", header_style))
+            for exp in cv_data.experience:
+                title = f"{exp.get('job_title', '')} - {exp.get('company', '')}"
+                period = f"{exp.get('start_date', '')} - {exp.get('end_date', '')}"
+                story.append(Paragraph(title, body_style))
+                story.append(Paragraph(period, small_style))
+                story.append(Paragraph(f"- {exp.get('description', '')}", body_style))
+
+        if cv_data.education:
+            story.append(Paragraph("Education", header_style))
+            for edu in cv_data.education:
+                education_line = f"{edu.get('degree', '')} in {edu.get('field', '')} - {edu.get('institution', '')} ({edu.get('graduation_year', '')})"
+                story.append(Paragraph(education_line, body_style))
+
+        if cv_data.skills:
+            story.append(Paragraph("Skills", header_style))
+            story.append(Paragraph(", ".join(cv_data.skills), body_style))
+
+        if cv_data.certifications:
+            story.append(Paragraph("Certifications", header_style))
+            for cert in cv_data.certifications:
+                cert_line = f"{cert.get('name', '')} - {cert.get('issuer', '')} ({cert.get('issue_date', '')})"
+                story.append(Paragraph(cert_line, body_style))
+
+        doc.build(story)
     
     @staticmethod
     def export_to_plain_text(cv_data: CVData, output_path: str):
@@ -376,10 +476,15 @@ class CVMaker:
         # Export ke JSON
         json_path = output_dir / f"{filename}.json"
         CVExporter.export_to_json(self.cv, str(json_path))
+
+        # Export ke PDF
+        pdf_path = output_dir / f"{filename}.pdf"
+        CVExporter.export_to_pdf(self.cv, str(pdf_path))
         
         print(f"\nCV berhasil disimpan di folder: {output_dir}")
         print(f"- Plain text: {text_path}")
         print(f"- JSON: {json_path}")
+        print(f"- PDF: {pdf_path}")
 
 
 def main():
