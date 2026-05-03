@@ -676,6 +676,26 @@ class CVMaker:
         print(f"- Plain text: {text_path}")
         print(f"- JSON: {json_path}")
         print(f"- PDF: {pdf_path}")
+    
+    def check_job_fit(self, job_description: str) -> Dict:
+        """Analisis kecocokan CV dengan job description"""
+        print("Menganalisis job fit menggunakan AI...")
+        analysis = self.job_fit_analyzer.analyze_fit(self.cv, job_description)
+        return analysis
+    
+    def check_job_fit_from_file(self, job_file_path: str) -> Dict:
+        """Analisis kecocokan CV dengan job description dari file"""
+        print(f"Membaca job description dari {job_file_path}...")
+        analysis = self.job_fit_analyzer.analyze_fit_from_file(self.cv, job_file_path)
+        return analysis
+    
+    def save_job_fit_analysis(self, analysis: Dict, filename: str = "job_fit_analysis"):
+        """Simpan hasil analisis job fit"""
+        output_dir = Path("cv_output")
+        output_dir.mkdir(exist_ok=True)
+        
+        json_path = output_dir / f"{filename}.json"
+        self.job_fit_analyzer.save_fit_analysis(analysis, str(json_path))
 
 
 def main():
@@ -719,8 +739,43 @@ def main():
         print("\n[4] Menyimpan CV...")
         cv_maker.save_cv("my_cv_ats_optimized")
         
+        # Job Fit Analysis - Demo dengan job description manual
+        print("\n[5] Menganalisis Job Fit...")
+        sample_job_description = """
+        SENIOR FULL STACK DEVELOPER - PYTHON & JAVASCRIPT
+        
+        Requirements:
+        - 5+ years of experience in Full Stack Development
+        - Strong proficiency in Python and JavaScript/Node.js
+        - Experience with React, Django, or FastAPI frameworks
+        - Database management (PostgreSQL, MongoDB)
+        - Experience with Docker and containerization
+        - Cloud deployment (AWS, GCP, or Azure)
+        - Git version control
+        - REST API design and implementation
+        - Machine Learning basics (nice to have)
+        - Agile/Scrum methodology
+        
+        Responsibilities:
+        - Design and develop scalable web applications
+        - Lead technical architecture decisions
+        - Mentor junior developers
+        - Collaborate with design and product teams
+        - Code review and quality assurance
+        - Implement CI/CD pipelines
+        """
+        
+        # Analisis job fit
+        fit_analysis = cv_maker.check_job_fit(sample_job_description)
+        
+        # Display hasil analisis
+        JobFitAnalyzer.display_fit_analysis(fit_analysis)
+        
+        # Simpan hasil analisis
+        cv_maker.save_job_fit_analysis(fit_analysis, "senior_developer_fit")
+        
         print("\n" + "=" * 60)
-        print("CV ATS Maker selesai!")
+        print("CV ATS Maker dengan Job Fit Analysis selesai!")
         print("=" * 60)
         
     except ValueError as e:
