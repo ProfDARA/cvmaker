@@ -75,6 +75,55 @@ Berikan hasil yang siap pakai untuk ATS."""
         except Exception as e:
             print(f"Error menggunakan Gemini API: {e}")
             return content
+    
+    def analyze_job_fit(self, cv_content: str, job_description: str) -> Dict:
+        """Analisis kecocokan CV dengan job description menggunakan Gemini API"""
+        prompt = f"""Analisis kecocokan antara CV dan job description berikut. 
+
+CV:
+{cv_content}
+
+JOB DESCRIPTION:
+{job_description}
+
+Berikan analisis dalam format JSON dengan struktur berikut:
+{{
+    "fit_score": <1-100>,
+    "fit_level": "<EXCELLENT/GOOD/MODERATE/POOR>",
+    "matched_skills": [<list skills yang match>],
+    "missing_skills": [<list skills yang tidak ada di CV>],
+    "matched_experience": [<list pengalaman relevan>],
+    "strengths": [<list kekuatan CV untuk role ini>],
+    "weaknesses": [<list kelemahan CV untuk role ini>],
+    "recommendations": [<list rekomendasi untuk improve CV>],
+    "summary": "<ringkasan overall fit>"
+}}
+
+Gunakan bahasa Indonesia. Berikan analisis yang objektif dan terperinci."""
+        
+        try:
+            response = self.model.generate_content(prompt)
+            response_text = response.text.strip()
+            
+            # Coba extract JSON dari response
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                return json.loads(json_str)
+            else:
+                # Fallback jika parsing gagal
+                return {
+                    "fit_score": 0,
+                    "fit_level": "UNKNOWN",
+                    "analysis": response_text
+                }
+        except Exception as e:
+            print(f"Error menganalisis job fit: {e}")
+            return {
+                "fit_score": 0,
+                "fit_level": "ERROR",
+                "error": str(e)
+            }
 
 
 class CVData:
