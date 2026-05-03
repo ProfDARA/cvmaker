@@ -266,6 +266,147 @@ class ATSOptimizer:
         return experience_description
 
 
+class JobFitAnalyzer:
+    """Analisis kecocokan CV dengan job description"""
+    
+    def __init__(self, gemini_config: GeminiConfig):
+        """Initialize dengan GeminiConfig instance"""
+        self.gemini = gemini_config
+    
+    @staticmethod
+    def load_job_description(filepath: str) -> str:
+        """Baca job description dari file txt"""
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return content
+        except FileNotFoundError:
+            raise FileNotFoundError(f"File job description tidak ditemukan: {filepath}")
+        except Exception as e:
+            raise Exception(f"Error membaca file job description: {e}")
+    
+    def format_cv_for_analysis(self, cv_data: CVData) -> str:
+        """Format CV data menjadi string untuk analisis"""
+        cv_text = []
+        
+        # Personal Info
+        pi = cv_data.personal_info
+        cv_text.append(f"Nama: {pi.get('full_name', '')}")
+        cv_text.append(f"Email: {pi.get('email', '')}")
+        cv_text.append(f"Phone: {pi.get('phone', '')}")
+        cv_text.append(f"Location: {pi.get('location', '')}")
+        
+        # Professional Summary
+        if cv_data.professional_summary:
+            cv_text.append(f"\nProfessional Summary:\n{cv_data.professional_summary}")
+        
+        # Skills
+        if cv_data.skills:
+            cv_text.append(f"\nSkills: {', '.join(cv_data.skills)}")
+        
+        # Experience
+        if cv_data.experience:
+            cv_text.append("\nExperience:")
+            for exp in cv_data.experience:
+                cv_text.append(f"\n{exp['job_title']} at {exp['company']}")
+                cv_text.append(f"{exp['start_date']} - {exp['end_date']}")
+                cv_text.append(f"Description: {exp['description']}")
+        
+        # Education
+        if cv_data.education:
+            cv_text.append("\nEducation:")
+            for edu in cv_data.education:
+                cv_text.append(f"{edu['degree']} in {edu['field']}")
+                cv_text.append(f"{edu['institution']} ({edu['graduation_year']})")
+        
+        # Certifications
+        if cv_data.certifications:
+            cv_text.append("\nCertifications:")
+            for cert in cv_data.certifications:
+                cv_text.append(f"{cert['name']} - {cert['issuer']} ({cert['issue_date']})")
+        
+        return "\n".join(cv_text)
+    
+    def analyze_fit(self, cv_data: CVData, job_description: str) -> Dict:
+        """Analisis kecocokan CV dengan job description"""
+        cv_text = self.format_cv_for_analysis(cv_data)
+        return self.gemini.analyze_job_fit(cv_text, job_description)
+    
+    def analyze_fit_from_file(self, cv_data: CVData, job_file_path: str) -> Dict:
+        """Analisis kecocokan CV dengan job description dari file"""
+        job_description = self.load_job_description(job_file_path)
+        return self.analyze_fit(cv_data, job_description)
+    
+    def save_fit_analysis(self, analysis: Dict, output_path: str):
+        """Simpan hasil analisis ke file JSON"""
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(analysis, f, indent=2, ensure_ascii=False)
+        print(f"Hasil analisis disimpan ke {output_path}")
+    
+    @staticmethod
+    def display_fit_analysis(analysis: Dict):
+        """Tampilkan hasil analisis dengan format yang rapi"""
+        print("\n" + "=" * 70)
+        print("JOB FIT ANALYSIS RESULT")
+        print("=" * 70)
+        
+        if "error" in analysis:
+            print(f"❌ Error: {analysis['error']}")
+            return
+        
+        # Fit Score
+        fit_score = analysis.get("fit_score", 0)
+        fit_level = analysis.get("fit_level", "UNKNOWN")
+        
+        # Visual score bar
+        bar_length = 50
+        filled = int(bar_length * fit_score / 100)
+        bar = "█" * filled + "░" * (bar_length - filled)
+        
+        print(f"\n📊 FIT SCORE: {fit_score}/100 [{bar}]")
+        print(f"📈 FIT LEVEL: {fit_level}")
+        
+        # Summary
+        if "summary" in analysis:
+            print(f"\n📝 Summary:\n{analysis['summary']}")
+        
+        # Matched Skills
+        if analysis.get("matched_skills"):
+            print(f"\n✅ Matched Skills ({len(analysis['matched_skills'])}):")
+            for skill in analysis["matched_skills"][:10]:
+                print(f"   • {skill}")
+            if len(analysis["matched_skills"]) > 10:
+                print(f"   ... dan {len(analysis['matched_skills']) - 10} skill lainnya")
+        
+        # Missing Skills
+        if analysis.get("missing_skills"):
+            print(f"\n❌ Missing Skills ({len(analysis['missing_skills'])}):")
+            for skill in analysis["missing_skills"][:8]:
+                print(f"   • {skill}")
+            if len(analysis["missing_skills"]) > 8:
+                print(f"   ... dan {len(analysis['missing_skills']) - 8} skill lainnya")
+        
+        # Strengths
+        if analysis.get("strengths"):
+            print(f"\n💪 Strengths:")
+            for strength in analysis["strengths"]:
+                print(f"   • {strength}")
+        
+        # Weaknesses
+        if analysis.get("weaknesses"):
+            print(f"\n⚠️  Weaknesses:")
+            for weakness in analysis["weaknesses"]:
+                print(f"   • {weakness}")
+        
+        # Recommendations
+        if analysis.get("recommendations"):
+            print(f"\n💡 Recommendations:")
+            for rec in analysis["recommendations"]:
+                print(f"   • {rec}")
+        
+        print("\n" + "=" * 70)
+
+
 class CVExporter:
     """Export CV ke berbagai format"""
 
@@ -433,6 +574,7 @@ class CVMaker:
         self.gemini = GeminiConfig(api_key)
         self.cv = CVData()
         self.ats_optimizer = ATSOptimizer()
+        self.job_fit_analyzer = JobFitAnalyzer(self.gemini)
     
     def create_sample_cv(self) -> CVData:
         """Buat sample CV untuk testing"""
