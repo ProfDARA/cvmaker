@@ -7,6 +7,7 @@ Aplikasi modern untuk membuat CV yang dioptimalkan untuk Applicant Tracking Syst
 - **CV Data Management**: Manajemen data CV terstruktur dengan informasi lengkap
 - **ATS Optimization**: Otomatis mengoptimalkan CV untuk sistem ATS
 - **Text Summarizer**: Merangkum deskripsi pekerjaan menggunakan Gemini API
+- **Job Fit Analyzer** ⭐ NEW: Analisis kecocokan CV dengan job description menggunakan AI
 - **Multi-Format Export**: Export ke Plain Text (ATS-friendly) dan JSON
 - **Professional Keywords**: Menambahkan action verbs dan keywords industri
 - **Format Cleaning**: Menghapus formatting kompleks yang tidak ATS-friendly
@@ -117,6 +118,44 @@ summary = cv_maker.summarize_experience(
 print(summary)
 ```
 
+### Job Fit Analyzer (NEW)
+
+Analisis kecocokan CV Anda dengan job description menggunakan AI:
+
+```python
+from CVmaker import JobFitAnalyzer
+
+# Method 1: Direct job description
+job_desc = """
+SENIOR DEVELOPER
+
+Requirements:
+- 5+ years Python experience
+- Django expertise
+- PostgreSQL & Docker
+- AWS cloud platforms
+"""
+
+analysis = cv_maker.check_job_fit(job_desc)
+JobFitAnalyzer.display_fit_analysis(analysis)
+
+# Method 2: Load from file
+analysis = cv_maker.check_job_fit_from_file("job_description.txt")
+JobFitAnalyzer.display_fit_analysis(analysis)
+
+# Save results
+cv_maker.save_job_fit_analysis(analysis, "my_analysis")
+```
+
+**Output:**
+- Fit Score (0-100)
+- Matched & Missing Skills
+- Strengths & Weaknesses
+- AI-Generated Recommendations
+- Saved to JSON format
+
+Lihat [JOBFIT_GUIDE.md](JOBFIT_GUIDE.md) untuk dokumentasi lengkap.
+
 ## 📁 Struktur File
 
 ```
@@ -150,12 +189,18 @@ CV maker/
    - Remove special characters
    - Add action keywords
 
-4. **CVExporter**
+4. **JobFitAnalyzer** ⭐ NEW
+   - Analisis kecocokan CV dengan job description
+   - Load job description dari file
+   - Generate recommendations
+   - Display hasil dengan formatting rapi
+
+5. **CVExporter**
    - Export CV ke berbagai format
    - Plain text format (ATS-friendly)
    - JSON format
 
-5. **CVMaker**
+6. **CVMaker**
    - Main application class
    - Koordinasi semua components
    - Workflow management
