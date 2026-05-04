@@ -14,6 +14,18 @@ from flask_cors import CORS
 from pathlib import Path
 from CVmaker import CVData, CVMaker, JobFitAnalyzer, ATSOptimizer
 from datetime import datetime
+import re
+
+# OCR imports (optional at runtime)
+try:
+    from pdf2image import convert_from_path
+    import pytesseract
+    from PIL import Image
+    from PyPDF2 import PdfReader
+    OCR_AVAILABLE = True
+except Exception:
+    # If OCR libs or system deps (poppler, tesseract) not available, fall back to text extraction only
+    OCR_AVAILABLE = False
 
 app = Flask(__name__)
 CORS(app)
@@ -247,18 +259,142 @@ def save_cv():
 def load_cv(filename):
     """Load CV data dari file JSON"""
     try:
-        filepath = UPLOAD_FOLDER / f"{filename}.json"
-        
-        if not filepath.exists():
-            return APIResponse.error(f"CV file not found: {filename}", status=404)
-        
-        with open(filepath, 'r', encoding='utf-8') as f:
-            cv_data = json.load(f)
-        
-        return APIResponse.success(cv_data, message="CV loaded successfully")
+        # Prefer JSON CV if exists
+        json_path = UPLOAD_FOLDER / f"{filename}.json"
+        pdf_path = UPLOAD_FOLDER / f"{filename}.pdf"
+
+        if json_path.exists():
+            with open(json_path, 'r', encoding='utf-8') as f:
+                cv_data = json.load(f)
+            return APIResponse.success(cv_data, message="CV loaded successfully (from JSON)")
+
+        # If JSON not found, try PDF (extract text and parse)
+        if pdf_path.exists():
+            try:
+                extracted_text = extract_text_from_pdf(str(pdf_path))
+                parsed_cv = parse_cv_text_to_structured(extracted_text)
+                # include raw_text for user
+                parsed_cv['raw_text'] = extracted_text
+                return APIResponse.success(parsed_cv, message="CV loaded successfully (from PDF via OCR/text extraction)")
+            except Exception as e:
+                return APIResponse.error(f"Error extracting text from PDF: {str(e)}", status=500)
+
+        return APIResponse.error(f"CV file not found: {filename}", status=404)
     
     except Exception as e:
         return APIResponse.error(f"Error loading CV: {str(e)}", status=500)
+
+
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """Extract text from PDF. Try direct text extraction first, then OCR if needed.
+
+    Requires PyPDF2 for text extraction. For OCR, requires pdf2image + pytesseract + poppler + tesseract installed.
+    """
+    # Try PyPDF2 text extraction
+    text_chunks = []
+    try:
+        if 'PdfReader' in globals():
+            reader = PdfReader(pdf_path)
+            for page in reader.pages:
+                try:
+                    page_text = page.extract_text() or ''
+                    text_chunks.append(page_text)
+                except Exception:
+                    continue
+    except Exception:
+        # ignore and continue to OCR fallback
+        pass
+
+    combined = "\n".join([t for t in text_chunks if t])
+    # If extraction returned enough text, return it
+    if combined and len(combined) > 200:
+        return combined
+
+    # Fallback to OCR if available
+    if OCR_AVAILABLE:
+        images = convert_from_path(pdf_path)
+        ocr_texts = []
+        for img in images:
+            try:
+                text = pytesseract.image_to_string(img)
+                ocr_texts.append(text)
+            except Exception:
+                continue
+        return "\n".join(ocr_texts)
+
+    # If OCR not available and PyPDF2 failed, return whatever we have (even if short)
+    return combined
+
+
+def parse_cv_text_to_structured(text: str) -> dict:
+    """Attempt basic parsing of CV text into structured CV data.
+
+    This is heuristic-based: extracts name (first lines), email, phone, and sections by keywords.
+    Falls back to raw_text in fields when uncertain.
+    """
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    cv = {
+        "personal_info": {},
+        "professional_summary": "",
+        "experience": [],
+        "education": [],
+        "skills": [],
+        "certifications": [],
+        "languages": [],
+        "projects": []
+    }
+
+    # Basic personal info heuristics
+    if lines:
+        cv['personal_info']['full_name'] = lines[0]
+
+    # Email and phone regex
+    email_match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+    phone_match = re.search(r"(\+?\d[\d\s\-().]{6,}\d)", text)
+    if email_match:
+        cv['personal_info']['email'] = email_match.group(0)
+    if phone_match:
+        cv['personal_info']['phone'] = phone_match.group(0)
+
+    # Attempt to split sections by common headings
+    lowered = text.lower()
+    # Find summary
+    for heading in ["professional summary", "summary", "profile", "about me"]:
+        idx = lowered.find(heading)
+        if idx != -1:
+            # take following 400 chars as summary
+            cv['professional_summary'] = text[idx + len(heading):].strip().split('\n\n')[0][:800].strip()
+            break
+
+    # Skills: look for "skills" section
+    skills_idx = lowered.find("skills")
+    if skills_idx != -1:
+        # extract a short window after heading
+        skills_block = text[skills_idx:skills_idx+400]
+        # split by commas or line breaks and filter
+        parts = re.split(r'[\n,;•\-]', skills_block)
+        skills = [p.strip() for p in parts if len(p.strip())>1 and not p.lower().startswith('skills')]
+        cv['skills'] = skills[:50]
+
+    # Experience: try to find lines with years or company keywords
+    exp_lines = []
+    for ln in lines:
+        if re.search(r"\b(\d{4})\b", ln) or any(k in ln.lower() for k in ['company', 'experience', 'worked at', 'engineer','developer','manager']):
+            exp_lines.append(ln)
+    if exp_lines:
+        for e in exp_lines[:10]:
+            cv['experience'].append({"title": e, "company":"", "dates":"", "description":e})
+
+    # Education: look for education keywords
+    edu_lines = [ln for ln in lines if any(k in ln.lower() for k in ['university', 'bachelor', 'master', 'degree', 'college', 'education'])]
+    for e in edu_lines[:5]:
+        cv['education'].append({"degree": e, "institution":"", "year":""})
+
+    # If professional_summary still empty, take first paragraph after name
+    if not cv['professional_summary'] and len(lines) > 1:
+        cv['professional_summary'] = lines[1][:800]
+
+    return cv
 
 
 @app.route("/api/cv/list", methods=["GET"])

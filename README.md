@@ -68,6 +68,24 @@ export GEMINI_API_KEY="your_api_key_here"
 echo GEMINI_API_KEY=your_api_key_here > .env
 ```
 
+#### OCR prerequisites (optional, required to load PDF CVs via OCR)
+
+- Tesseract OCR (system dependency)
+   - Windows: install from https://github.com/tesseract-ocr/tesseract and add to PATH
+   - macOS (Homebrew): `brew install tesseract`
+   - Linux (apt): `sudo apt-get install tesseract-ocr`
+
+- Poppler (required by pdf2image)
+   - Windows: download from https://blog.alivate.com.au/poppler-windows/ and add `bin` to PATH
+   - macOS (Homebrew): `brew install poppler`
+   - Linux (apt): `sudo apt-get install poppler-utils`
+
+After system deps are installed, install Python packages:
+
+```bash
+pip install -r requirements.txt
+```
+
 ### Start Application
 
 ```bash
@@ -294,7 +312,7 @@ Output: Fit score + Analysis + Recommendations
 
 ---
 
-## 🔐 Data Privacy
+## Data Privacy
 
 - ✅ All data stored **locally** on your computer
 - ✅ No cloud upload or sync
@@ -304,7 +322,7 @@ Output: Fit score + Analysis + Recommendations
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Port Already in Use
 ```bash

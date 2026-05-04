@@ -1,0 +1,42 @@
+{
+  "personal_info": {
+    "full_name": "red",
+    "email": "danang.antonov@gmail.com",
+    "phone": "085329446538",
+    "location": "Klaten",
+    "linkedin": "profdara",
+    "website": "ut.ac.id"
+  },
+  "professional_summary": "adsadawfwafsf",
+  "experience": [
+    {
+      "id": 0,
+      "job_title": "asfasf",
+      "company": "fasfas",
+      "start_date": "asfasf",
+      "end_date": "asfsaf",
+      "description": "asfasfasf"
+    },
+    {
+      "id": 1,
+      "job_title": "asfasf",
+      "company": "safas",
+      "start_date": "fsafasf",
+      "end_date": "fsafas",
+      "description": "fasfas"
+    }
+  ],
+  "education": [
+    {
+      "id": 0,
+      "degree": "asffasf",
+      "institution": "fasffas",
+      "field": "asfas",
+      "graduation_year": "fsafas"
+    }
+  ],
+  "skills": [],
+  "certifications": [],
+  "languages": [],
+  "projects": []
+}
