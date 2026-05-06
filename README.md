@@ -88,13 +88,13 @@ pip install -r requirements.txt
 
 ### Start Application
 
+Run the single backend server which also serves the frontend:
+
 ```bash
-# Terminal 1 - Start backend server
+# Start backend (serves API + frontend)
 python server.py
 
-# Terminal 2 - Open frontend
-# Double-click index.html
-# atau: file:///path/to/index.html
+# Then open http://localhost:5000 in your browser
 ```
 
 ### Get Gemini API Key

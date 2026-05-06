@@ -11,6 +11,7 @@ import os
 import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask import send_file
 from pathlib import Path
 from CVmaker import CVData, CVMaker, JobFitAnalyzer, ATSOptimizer
 from datetime import datetime
@@ -65,13 +66,15 @@ class APIResponse:
 
 @app.route("/", methods=["GET"])
 def index():
-    """Redirect ke frontend"""
+    """Serve frontend index.html if available, otherwise return API status."""
+    index_path = Path("index.html")
+    if index_path.exists():
+        return send_file(str(index_path))
     return jsonify({
         "status": "running",
         "message": "CV Maker API Server",
         "version": "2.0",
         "docs": "Visit /api/docs untuk API documentation",
-        "frontend": "Open index.html in browser"
     })
 
 
