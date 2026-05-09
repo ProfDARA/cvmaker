@@ -650,6 +650,10 @@
                                     <input type="text" id="linkedin" placeholder="linkedin.com/in/johndoe" style="flex: 1;">
                                     <button class="btn btn-secondary" type="button" onclick="fetchLinkedInProfile()">Fetch</button>
                                 </div>
+                                <div class="form-row full" style="gap: 10px; align-items: end; margin-top: 10px;">
+                                    <input type="file" id="linkedinFile" accept=".json,.pdf,.txt" style="flex: 1;">
+                                    <button class="btn btn-secondary" type="button" onclick="importLinkedInFile()">Import File</button>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label>Website</label>
@@ -1207,6 +1211,42 @@
                 }
             } catch (err) {
                 showAlert(`Error fetching LinkedIn profile: ${err.message}`, 'error');
+            }
+        }
+
+        async function importLinkedInFile() {
+            const fileInput = document.getElementById('linkedinFile');
+            const file = fileInput.files?.[0];
+
+            if (!file) {
+                showAlert('Please choose a LinkedIn export file first', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            showAlert('Importing LinkedIn file...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/linkedin/import-file`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    const importedCV = result.data.cv_data || {};
+                    importedCV.personal_info = importedCV.personal_info || {};
+                    populateCVForm(importedCV);
+                    showAlert('✓ LinkedIn file imported successfully', 'success');
+                    fileInput.value = '';
+                } else {
+                    showAlert(`Error: ${result.message}`, 'error');
+                }
+            } catch (err) {
+                showAlert(`Error importing LinkedIn file: ${err.message}`, 'error');
             }
         }
 

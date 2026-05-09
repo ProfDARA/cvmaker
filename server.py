@@ -289,6 +289,100 @@ def fetch_linkedin_profile():
         return APIResponse.error(f"Error fetching LinkedIn profile: {str(e)}", status=500)
 
 
+@app.route("/api/linkedin/import-file", methods=["POST"])
+def import_linkedin_file():
+    """Import LinkedIn export file atau resume file yang berisi data LinkedIn."""
+    try:
+        if "file" not in request.files:
+            return APIResponse.error("LinkedIn file is required", status=400)
+
+        uploaded_file = request.files["file"]
+        if not uploaded_file or not uploaded_file.filename:
+            return APIResponse.error("LinkedIn file is required", status=400)
+
+        filename = uploaded_file.filename.lower()
+        file_bytes = uploaded_file.read()
+
+        if filename.endswith(".json"):
+            try:
+                file_data = json.loads(file_bytes.decode("utf-8"))
+            except UnicodeDecodeError:
+                file_data = json.loads(file_bytes.decode("utf-8-sig"))
+
+            cv_data = normalize_linkedin_json_export(file_data)
+            return APIResponse.success(
+                {
+                    "source_type": "json",
+                    "filename": uploaded_file.filename,
+                    "cv_data": cv_data,
+                },
+                message="LinkedIn JSON export imported successfully",
+            )
+
+        if filename.endswith(".pdf"):
+            temp_path = UPLOAD_FOLDER / f"linkedin_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            with open(temp_path, "wb") as temp_file:
+                temp_file.write(file_bytes)
+
+            try:
+                extracted_text = extract_text_from_pdf(str(temp_path))
+                parsed_cv = parse_cv_text_to_structured(extracted_text)
+                parsed_cv["personal_info"]["linkedin"] = first_non_empty(
+                    detect_linkedin_url_from_text(extracted_text),
+                    parsed_cv.get("personal_info", {}).get("linkedin", ""),
+                )
+                parsed_cv["personal_info"]["full_name"] = first_non_empty(
+                    parsed_cv.get("personal_info", {}).get("full_name", ""),
+                    extract_name_from_text(extracted_text),
+                )
+                parsed_cv["personal_info"]["location"] = first_non_empty(
+                    parsed_cv.get("personal_info", {}).get("location", ""),
+                    extract_location_from_text(extracted_text),
+                )
+                parsed_cv["professional_summary"] = first_non_empty(
+                    parsed_cv.get("professional_summary", ""),
+                    extract_headline_from_text(extracted_text),
+                )
+
+                parsed_cv["experience"] = ensure_items_have_ids(parsed_cv.get("experience", []), "experience")
+                parsed_cv["education"] = ensure_items_have_ids(parsed_cv.get("education", []), "education")
+
+                return APIResponse.success(
+                    {
+                        "source_type": "pdf",
+                        "filename": uploaded_file.filename,
+                        "cv_data": parsed_cv,
+                    },
+                    message="LinkedIn PDF imported successfully",
+                )
+            finally:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        if filename.endswith(".txt"):
+            decoded_text = file_bytes.decode("utf-8", errors="ignore")
+            parsed_cv = parse_cv_text_to_structured(decoded_text)
+            parsed_cv["experience"] = ensure_items_have_ids(parsed_cv.get("experience", []), "experience")
+            parsed_cv["education"] = ensure_items_have_ids(parsed_cv.get("education", []), "education")
+            return APIResponse.success(
+                {
+                    "source_type": "txt",
+                    "filename": uploaded_file.filename,
+                    "cv_data": parsed_cv,
+                },
+                message="LinkedIn text file imported successfully",
+            )
+
+        return APIResponse.error("Unsupported file type. Use JSON, PDF, or TXT.", status=400)
+
+    except json.JSONDecodeError:
+        return APIResponse.error("Invalid JSON file", status=400)
+    except Exception as e:
+        return APIResponse.error(f"Error importing LinkedIn file: {str(e)}", status=500)
+
+
 @app.route("/api/cv/save", methods=["POST"])
 def save_cv():
     """
@@ -549,9 +643,16 @@ def build_linkedin_profile_meta(soup: BeautifulSoup, page_url: str) -> dict:
         meta_tags.get("description", ""),
     )
 
+    location = first_non_empty(
+        person_object.get("address", {}).get("addressLocality") if isinstance(person_object.get("address", {}), dict) else "",
+        meta_tags.get("og:location", ""),
+        meta_tags.get("place:location:location", ""),
+    )
+
     return {
         "full_name": full_name,
         "headline": headline,
+        "location": location,
         "image": first_non_empty(person_object.get("image"), meta_tags.get("og:image", "")),
         "url": first_non_empty(person_object.get("url"), page_url),
         "same_as": person_object.get("sameAs", []),
@@ -585,14 +686,35 @@ def parse_linkedin_profile_html(html: str, page_url: str) -> Tuple[dict, dict]:
         parsed_cv["personal_info"].get("full_name", ""),
     )
     parsed_cv["personal_info"]["linkedin"] = page_url
+    parsed_cv["personal_info"]["location"] = first_non_empty(
+        profile_meta.get("location", ""),
+        parsed_cv["personal_info"].get("location", ""),
+    )
     parsed_cv["professional_summary"] = first_non_empty(
         profile_meta.get("headline"),
         parsed_cv.get("professional_summary", ""),
     )
 
-    if profile_meta.get("headline") and not parsed_cv.get("skills"):
-        headline_parts = [part.strip() for part in re.split(r"[|,/]", profile_meta["headline"]) if part.strip()]
-        parsed_cv["skills"] = headline_parts[:12]
+    headline_parts = [part.strip() for part in re.split(r"[|,/•]", profile_meta.get("headline", "")) if part.strip()]
+    if not parsed_cv.get("skills"):
+        parsed_cv["skills"] = dedupe_preserve_order(headline_parts[:12])
+
+    if len(parsed_cv.get("skills", [])) < 5:
+        parsed_cv["skills"] = dedupe_preserve_order(
+            parsed_cv.get("skills", []) + extract_skills_from_text(page_text, headline_parts)
+        )[:25]
+
+    if len(parsed_cv.get("experience", [])) < 1:
+        parsed_cv["experience"] = ensure_items_have_ids(
+            extract_linkedin_experience(page_text, profile_meta),
+            "experience",
+        )
+
+    if len(parsed_cv.get("education", [])) < 1:
+        parsed_cv["education"] = ensure_items_have_ids(
+            extract_linkedin_education(page_text),
+            "education",
+        )
 
     parsed_cv["experience"] = ensure_items_have_ids(parsed_cv.get("experience", []), "experience")
     parsed_cv["education"] = ensure_items_have_ids(parsed_cv.get("education", []), "education")
@@ -630,6 +752,234 @@ def ensure_items_have_ids(items: List[Dict[str, Any]], item_type: str) -> List[D
         normalized_items.append(normalized_item)
 
     return normalized_items
+
+
+def dedupe_preserve_order(items: List[str]) -> List[str]:
+    seen = set()
+    deduped = []
+    for item in items:
+        normalized = item.strip()
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(normalized)
+    return deduped
+
+
+def detect_linkedin_url_from_text(text: str) -> str:
+    match = re.search(r"https?://(?:www\.)?linkedin\.com/(?:in|pub)/[A-Za-z0-9\-_%/?=&.]+", text, re.IGNORECASE)
+    return match.group(0).rstrip('.,)]\"\'') if match else ""
+
+
+def extract_name_from_text(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    first_line = lines[0]
+    if 2 <= len(first_line.split()) <= 5:
+        return first_line
+    for line in lines[:10]:
+        if len(line.split()) <= 5 and not re.search(r"\b(linkedin|experience|education|skills)\b", line, re.IGNORECASE):
+            return line
+    return ""
+
+
+def extract_location_from_text(text: str) -> str:
+    location_patterns = [
+        r"(?:Greater\s+)?[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*,\s*[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*",
+        r"(?:Remote|Hybrid|On-site|Onsite)",
+        r"[A-Z][A-Za-z]+,\s*(?:Indonesia|Singapore|Malaysia|Philippines|Vietnam|Thailand|India|United States|USA|Australia)",
+    ]
+    for pattern in location_patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(0)
+    return ""
+
+
+def extract_headline_from_text(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    for line in lines[:12]:
+        if any(keyword in line.lower() for keyword in ["engineer", "developer", "designer", "manager", "analyst", "specialist", "consultant", "lead", "founder"]):
+            return line[:200]
+    return lines[1][:200] if len(lines) > 1 else lines[0][:200]
+
+
+def extract_skills_from_text(text: str, headline_parts: Optional[List[str]] = None) -> List[str]:
+    headline_parts = headline_parts or []
+    skills = []
+    skill_keywords = [
+        "python", "javascript", "typescript", "react", "django", "flask", "fastapi", "node.js",
+        "sql", "postgresql", "mysql", "mongodb", "docker", "kubernetes", "aws", "azure", "gcp",
+        "figma", "ui/ux", "product management", "project management", "data analysis", "machine learning",
+        "communication", "leadership", "agile", "scrum", "rest api", "graphql", "git"
+    ]
+
+    lowered = text.lower()
+    for skill in skill_keywords:
+        if skill in lowered:
+            skills.append(skill.title() if skill.islower() else skill)
+
+    for part in headline_parts:
+        if 2 <= len(part) <= 40 and not re.search(r"\b(at|and|the|of)\b", part, re.IGNORECASE):
+            skills.append(part)
+
+    return dedupe_preserve_order(skills)
+
+
+def extract_linkedin_experience(text: str, profile_meta: dict) -> List[Dict[str, Any]]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    experience_entries = []
+    role_keywords = ["engineer", "developer", "manager", "analyst", "specialist", "consultant", "lead", "director", "founder", "intern"]
+    date_pattern = re.compile(r"\b(?:19|20)\d{2}\b(?:\s*[-–—]\s*(?:Present|Current|(?:19|20)\d{2}))?", re.IGNORECASE)
+
+    for index, line in enumerate(lines):
+        if not date_pattern.search(line) and not any(keyword in line.lower() for keyword in role_keywords):
+            continue
+
+        next_line = lines[index + 1] if index + 1 < len(lines) else ""
+        job_title = line
+        company = ""
+        start_date = ""
+        end_date = ""
+
+        date_match = date_pattern.search(line)
+        if date_match:
+            date_text = date_match.group(0)
+            parts = re.split(r"\s*[-–—]\s*", date_text)
+            start_date = parts[0].strip()
+            end_date = parts[1].strip() if len(parts) > 1 else "Present"
+            job_title = line[:date_match.start()].strip(" -|•") or next_line
+
+        if " at " in job_title.lower():
+            split_title = re.split(r"\s+at\s+", job_title, maxsplit=1, flags=re.IGNORECASE)
+            if len(split_title) == 2:
+                job_title, company = split_title[0].strip(), split_title[1].strip()
+
+        description = next_line if next_line and next_line != job_title else ""
+        if len(job_title.split()) < 2 and next_line:
+            job_title = next_line
+
+        if job_title:
+            experience_entries.append({
+                "job_title": job_title,
+                "company": company,
+                "start_date": start_date,
+                "end_date": end_date,
+                "description": description or job_title,
+            })
+
+        if len(experience_entries) >= 6:
+            break
+
+    if not experience_entries and profile_meta.get("headline"):
+        experience_entries.append({
+            "job_title": profile_meta.get("headline", "LinkedIn Profile"),
+            "company": "",
+            "start_date": "",
+            "end_date": "",
+            "description": profile_meta.get("headline", ""),
+        })
+
+    return experience_entries
+
+
+def extract_linkedin_education(text: str) -> List[Dict[str, Any]]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    education_entries = []
+    degree_keywords = ["bachelor", "master", "phd", "associate", "diploma", "degree", "school", "university", "college"]
+
+    for index, line in enumerate(lines):
+        if not any(keyword in line.lower() for keyword in degree_keywords):
+            continue
+
+        next_line = lines[index + 1] if index + 1 < len(lines) else ""
+        education_entries.append({
+            "degree": line,
+            "institution": next_line if next_line else "",
+            "field": "",
+            "graduation_year": extract_year_from_text(line + " " + next_line),
+        })
+
+        if len(education_entries) >= 4:
+            break
+
+    return education_entries
+
+
+def extract_year_from_text(text: str) -> str:
+    match = re.search(r"\b(19|20)\d{2}\b", text)
+    return match.group(0) if match else ""
+
+
+def normalize_linkedin_json_export(file_data: Any) -> dict:
+    """Normalize JSON-based LinkedIn export or a previously structured CV payload."""
+    cv = {
+        "personal_info": {},
+        "professional_summary": "",
+        "experience": [],
+        "education": [],
+        "skills": [],
+        "certifications": [],
+        "languages": [],
+        "projects": []
+    }
+
+    if isinstance(file_data, dict) and any(key in file_data for key in ["personal_info", "experience", "education", "skills"]):
+        cv["personal_info"] = file_data.get("personal_info", {}) or {}
+        cv["professional_summary"] = file_data.get("professional_summary", "") or ""
+        cv["experience"] = file_data.get("experience", []) or []
+        cv["education"] = file_data.get("education", []) or []
+        cv["skills"] = file_data.get("skills", []) or []
+        cv["certifications"] = file_data.get("certifications", []) or []
+        cv["languages"] = file_data.get("languages", []) or []
+        cv["projects"] = file_data.get("projects", []) or []
+    elif isinstance(file_data, dict):
+        profile = file_data.get("profile", {}) if isinstance(file_data.get("profile", {}), dict) else {}
+        cv["personal_info"] = {
+            "full_name": first_non_empty(profile.get("full_name"), file_data.get("name", "")),
+            "email": first_non_empty(profile.get("email"), file_data.get("email", "")),
+            "phone": first_non_empty(profile.get("phone"), file_data.get("phone", "")),
+            "location": first_non_empty(profile.get("location"), file_data.get("location", "")),
+            "linkedin": first_non_empty(profile.get("linkedin"), file_data.get("url", "")),
+            "website": first_non_empty(profile.get("website"), file_data.get("website", "")),
+        }
+        cv["professional_summary"] = first_non_empty(profile.get("headline"), file_data.get("headline", ""), file_data.get("summary", ""))
+
+        if isinstance(file_data.get("skills"), list):
+            cv["skills"] = [item if isinstance(item, str) else str(item) for item in file_data.get("skills", [])]
+
+        if isinstance(file_data.get("experience"), list):
+            for item in file_data.get("experience", []):
+                if isinstance(item, dict):
+                    cv["experience"].append({
+                        "job_title": first_non_empty(item.get("job_title"), item.get("title"), item.get("role")),
+                        "company": first_non_empty(item.get("company"), item.get("organization")),
+                        "start_date": first_non_empty(item.get("start_date"), item.get("start")),
+                        "end_date": first_non_empty(item.get("end_date"), item.get("end")),
+                        "description": first_non_empty(item.get("description"), item.get("summary")),
+                    })
+
+        if isinstance(file_data.get("education"), list):
+            for item in file_data.get("education", []):
+                if isinstance(item, dict):
+                    cv["education"].append({
+                        "degree": first_non_empty(item.get("degree"), item.get("name")),
+                        "institution": first_non_empty(item.get("institution"), item.get("school"), item.get("organization")),
+                        "field": first_non_empty(item.get("field"), item.get("study")),
+                        "graduation_year": first_non_empty(item.get("graduation_year"), item.get("year")),
+                    })
+
+    cv["experience"] = ensure_items_have_ids(cv.get("experience", []), "experience")
+    cv["education"] = ensure_items_have_ids(cv.get("education", []), "education")
+    cv["skills"] = dedupe_preserve_order([str(skill).strip() for skill in cv.get("skills", []) if str(skill).strip()])
+
+    return cv
 
 
 @app.route("/api/cv/list", methods=["GET"])
