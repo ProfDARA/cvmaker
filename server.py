@@ -9,6 +9,7 @@ Endpoints:
 
 import os
 import json
+from typing import Any, Optional, Dict, List, Tuple
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask import send_file
@@ -16,6 +17,10 @@ from pathlib import Path
 from CVmaker import CVData, CVMaker, JobFitAnalyzer, ATSOptimizer
 from datetime import datetime
 import re
+from urllib.parse import urlparse
+
+import requests
+from bs4 import BeautifulSoup
 
 # OCR imports (optional at runtime)
 try:
@@ -224,6 +229,66 @@ def analyze_job_fit():
         return APIResponse.error(f"Error analyzing job fit: {str(e)}", status=500)
 
 
+@app.route("/api/linkedin/fetch", methods=["POST"])
+def fetch_linkedin_profile():
+    """Fetch data dari public LinkedIn profile URL dan ubah ke struktur CV."""
+    try:
+        data = request.get_json() or {}
+        linkedin_url = (data.get("url") or "").strip()
+
+        if not linkedin_url:
+            return APIResponse.error("LinkedIn URL is required", status=400)
+
+        normalized_url = normalize_linkedin_url(linkedin_url)
+        response = requests.get(
+            normalized_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9,id;q=0.8",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+            timeout=20,
+        )
+
+        if response.status_code in {401, 403, 429, 999}:
+            return APIResponse.error(
+                "LinkedIn membatasi akses ke profil ini. Pastikan URL mengarah ke profil publik yang bisa dibuka tanpa login.",
+                status=502,
+                data={"status_code": response.status_code},
+            )
+
+        response_text_lower = response.text.lower()
+        if any(marker in response_text_lower for marker in ["sign in", "join linkedin", "authwall", "checkpoint"]) and "linkedin" in response_text_lower:
+            return APIResponse.error(
+                "LinkedIn page terlihat meminta login. Gunakan public profile URL yang benar-benar bisa dibuka tanpa masuk akun.",
+                status=502,
+            )
+
+        response.raise_for_status()
+
+        cv_data, profile_meta = parse_linkedin_profile_html(response.text, normalized_url)
+
+        return APIResponse.success(
+            {
+                "source_url": normalized_url,
+                "resolved_url": response.url,
+                "profile_meta": profile_meta,
+                "cv_data": cv_data,
+            },
+            message="LinkedIn profile fetched successfully",
+        )
+
+    except ValueError as e:
+        return APIResponse.error(str(e), status=400)
+    except requests.RequestException as e:
+        return APIResponse.error(f"Error fetching LinkedIn profile: {str(e)}", status=502)
+    except Exception as e:
+        return APIResponse.error(f"Error fetching LinkedIn profile: {str(e)}", status=500)
+
+
 @app.route("/api/cv/save", methods=["POST"])
 def save_cv():
     """
@@ -400,6 +465,173 @@ def parse_cv_text_to_structured(text: str) -> dict:
     return cv
 
 
+def normalize_linkedin_url(linkedin_url: str) -> str:
+    """Normalize LinkedIn URL agar bisa difetch dengan konsisten."""
+    cleaned_url = linkedin_url.strip()
+    if not cleaned_url:
+        raise ValueError("LinkedIn URL is required")
+
+    if not cleaned_url.startswith(("http://", "https://")):
+        cleaned_url = f"https://{cleaned_url}"
+
+    parsed_url = urlparse(cleaned_url)
+    if "linkedin.com" not in parsed_url.netloc.lower():
+        raise ValueError("URL harus mengarah ke domain linkedin.com")
+
+    profile_match = re.match(r"^/(in|pub)/[^/]+", parsed_url.path)
+    normalized_path = profile_match.group(0) if profile_match else parsed_url.path.rstrip("/")
+    if not normalized_path:
+        raise ValueError("LinkedIn profile path is required")
+
+    return f"{parsed_url.scheme}://{parsed_url.netloc}{normalized_path}"
+
+
+def extract_json_ld_objects(soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    """Extract JSON-LD objects from a LinkedIn HTML document."""
+    objects: List[Dict[str, Any]] = []
+
+    for script_tag in soup.find_all("script", type="application/ld+json"):
+        raw_text = (script_tag.string or script_tag.get_text() or "").strip()
+        if not raw_text:
+            continue
+
+        try:
+            parsed_json = json.loads(raw_text)
+        except json.JSONDecodeError:
+            continue
+
+        if isinstance(parsed_json, list):
+            objects.extend([item for item in parsed_json if isinstance(item, dict)])
+        elif isinstance(parsed_json, dict):
+            objects.append(parsed_json)
+
+    return objects
+
+
+def first_non_empty(*values: Optional[str]) -> str:
+    for value in values:
+        if value and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def build_linkedin_profile_meta(soup: BeautifulSoup, page_url: str) -> dict:
+    """Collect basic metadata from a LinkedIn profile page."""
+    meta_tags = {
+        tag.get("property") or tag.get("name"): tag.get("content", "")
+        for tag in soup.find_all("meta")
+        if tag.get("content")
+    }
+
+    json_ld_objects = extract_json_ld_objects(soup)
+    person_object = next(
+        (
+            item
+            for item in json_ld_objects
+            if any(str(type_name).lower() in {"person", "profilepage"} for type_name in (item.get("@type", []) if isinstance(item.get("@type", []), list) else [item.get("@type", "")]))
+        ),
+        {},
+    )
+
+    og_title = meta_tags.get("og:title", "")
+    og_description = meta_tags.get("og:description", "")
+    page_title = soup.title.get_text(strip=True) if soup.title else ""
+
+    full_name = first_non_empty(
+        person_object.get("name"),
+        og_title.split("|")[0].split("-")[0] if og_title else "",
+        page_title.split("|")[0].split("-")[0] if page_title else "",
+    )
+
+    headline = first_non_empty(
+        person_object.get("headline"),
+        og_description,
+        meta_tags.get("description", ""),
+    )
+
+    return {
+        "full_name": full_name,
+        "headline": headline,
+        "image": first_non_empty(person_object.get("image"), meta_tags.get("og:image", "")),
+        "url": first_non_empty(person_object.get("url"), page_url),
+        "same_as": person_object.get("sameAs", []),
+        "raw_title": page_title,
+        "raw_description": meta_tags.get("description", ""),
+        "og_title": og_title,
+        "og_description": og_description,
+    }
+
+
+def parse_linkedin_profile_html(html: str, page_url: str) -> Tuple[dict, dict]:
+    """Parse public LinkedIn HTML into CV-shaped data.
+
+    This is best-effort only and works only for profiles that are publicly accessible.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    profile_meta = build_linkedin_profile_meta(soup, page_url)
+
+    page_text = soup.get_text("\n", strip=True)
+    main_tag = soup.find("main")
+    if main_tag:
+        main_text = main_tag.get_text("\n", strip=True)
+        if len(main_text) > len(page_text) * 0.5:
+            page_text = main_text
+
+    parsed_cv = parse_cv_text_to_structured(page_text)
+
+    parsed_cv["personal_info"] = parsed_cv.get("personal_info", {}) or {}
+    parsed_cv["personal_info"]["full_name"] = first_non_empty(
+        profile_meta.get("full_name"),
+        parsed_cv["personal_info"].get("full_name", ""),
+    )
+    parsed_cv["personal_info"]["linkedin"] = page_url
+    parsed_cv["professional_summary"] = first_non_empty(
+        profile_meta.get("headline"),
+        parsed_cv.get("professional_summary", ""),
+    )
+
+    if profile_meta.get("headline") and not parsed_cv.get("skills"):
+        headline_parts = [part.strip() for part in re.split(r"[|,/]", profile_meta["headline"]) if part.strip()]
+        parsed_cv["skills"] = headline_parts[:12]
+
+    parsed_cv["experience"] = ensure_items_have_ids(parsed_cv.get("experience", []), "experience")
+    parsed_cv["education"] = ensure_items_have_ids(parsed_cv.get("education", []), "education")
+
+    return parsed_cv, profile_meta
+
+
+def ensure_items_have_ids(items: List[Dict[str, Any]], item_type: str) -> List[Dict[str, Any]]:
+    """Ensure experience and education entries are editable in the UI."""
+    normalized_items = []
+    for index, item in enumerate(items or []):
+        normalized_item = dict(item)
+        if normalized_item.get("id") is None:
+            normalized_item["id"] = index
+
+        if item_type == "experience":
+            normalized_item["job_title"] = first_non_empty(
+                normalized_item.get("job_title"),
+                normalized_item.get("title"),
+                normalized_item.get("position"),
+            )
+            normalized_item["company"] = first_non_empty(normalized_item.get("company"))
+            normalized_item["start_date"] = first_non_empty(normalized_item.get("start_date"), normalized_item.get("dates"))
+            normalized_item["end_date"] = first_non_empty(normalized_item.get("end_date"))
+            normalized_item["description"] = first_non_empty(normalized_item.get("description"))
+        elif item_type == "education":
+            normalized_item["degree"] = first_non_empty(normalized_item.get("degree"))
+            normalized_item["institution"] = first_non_empty(normalized_item.get("institution"))
+            normalized_item["field"] = first_non_empty(normalized_item.get("field"))
+            normalized_item["graduation_year"] = first_non_empty(
+                normalized_item.get("graduation_year"),
+                normalized_item.get("year"),
+            )
+
+        normalized_items.append(normalized_item)
+
+    return normalized_items
+
+
 @app.route("/api/cv/list", methods=["GET"])
 def list_cvs():
     """List semua saved CV files"""
@@ -459,6 +691,11 @@ def api_docs():
                 "description": "Analyze kecocokan CV dengan job description",
                 "params": ["cv", "job_description"],
                 "returns": ["fit_score", "fit_level", "matched_skills", "missing_skills", "recommendations"]
+            },
+            "POST /api/linkedin/fetch": {
+                "description": "Fetch data dari public LinkedIn profile URL",
+                "params": ["url"],
+                "returns": ["source_url", "resolved_url", "profile_meta", "cv_data"]
             },
             "POST /api/cv/save": {
                 "description": "Save CV data ke JSON file",

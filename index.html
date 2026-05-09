@@ -646,7 +646,10 @@
                         <div class="form-row">
                             <div class="form-group">
                                 <label>LinkedIn</label>
-                                <input type="text" id="linkedin" placeholder="linkedin.com/in/johndoe">
+                                <div class="form-row full" style="gap: 10px; align-items: end;">
+                                    <input type="text" id="linkedin" placeholder="linkedin.com/in/johndoe" style="flex: 1;">
+                                    <button class="btn btn-secondary" type="button" onclick="fetchLinkedInProfile()">Fetch</button>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label>Website</label>
@@ -864,6 +867,35 @@
             return cvData;
         }
 
+        function normalizeExperienceEntries(experiences = []) {
+            return experiences.map((exp, index) => ({
+                id: Number.isInteger(exp.id) ? exp.id : index,
+                job_title: exp.job_title || exp.title || '',
+                company: exp.company || '',
+                start_date: exp.start_date || exp.dates || '',
+                end_date: exp.end_date || '',
+                description: exp.description || ''
+            }));
+        }
+
+        function normalizeEducationEntries(educations = []) {
+            return educations.map((edu, index) => ({
+                id: Number.isInteger(edu.id) ? edu.id : index,
+                degree: edu.degree || '',
+                institution: edu.institution || '',
+                field: edu.field || '',
+                graduation_year: edu.graduation_year || edu.year || ''
+            }));
+        }
+
+        function refreshItemIndexes() {
+            const experienceIds = cvData.experience.map(exp => Number(exp.id)).filter(Number.isFinite);
+            const educationIds = cvData.education.map(edu => Number(edu.id)).filter(Number.isFinite);
+
+            experienceIndex = experienceIds.length ? Math.max(...experienceIds) + 1 : 0;
+            educationIndex = educationIds.length ? Math.max(...educationIds) + 1 : 0;
+        }
+
         function populateCVForm(data) {
             document.getElementById('fullName').value = data.personal_info?.full_name || '';
             document.getElementById('email').value = data.personal_info?.email || '';
@@ -873,7 +905,24 @@
             document.getElementById('website').value = data.personal_info?.website || '';
             document.getElementById('summary').value = data.professional_summary || '';
             
-            cvData = data;
+            cvData = {
+                personal_info: {
+                    full_name: data.personal_info?.full_name || '',
+                    email: data.personal_info?.email || '',
+                    phone: data.personal_info?.phone || '',
+                    location: data.personal_info?.location || '',
+                    linkedin: data.personal_info?.linkedin || '',
+                    website: data.personal_info?.website || ''
+                },
+                professional_summary: data.professional_summary || '',
+                experience: normalizeExperienceEntries(data.experience || []),
+                education: normalizeEducationEntries(data.education || []),
+                skills: Array.isArray(data.skills) ? data.skills : [],
+                certifications: Array.isArray(data.certifications) ? data.certifications : [],
+                languages: Array.isArray(data.languages) ? data.languages : [],
+                projects: Array.isArray(data.projects) ? data.projects : []
+            };
+            refreshItemIndexes();
             renderSkills();
             renderExperience();
             renderEducation();
@@ -1126,6 +1175,41 @@
             }
         }
 
+        async function fetchLinkedInProfile() {
+            const linkedinInput = document.getElementById('linkedin');
+            const linkedinUrl = linkedinInput.value.trim();
+
+            if (!linkedinUrl) {
+                showAlert('Please enter a LinkedIn profile URL first', 'error');
+                return;
+            }
+
+            showAlert('Fetching LinkedIn profile...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/linkedin/fetch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: linkedinUrl })
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    const fetchedCV = result.data.cv_data || {};
+                    fetchedCV.personal_info = fetchedCV.personal_info || {};
+                    fetchedCV.personal_info.linkedin = result.data.source_url || linkedinUrl;
+
+                    populateCVForm(fetchedCV);
+                    showAlert('✓ LinkedIn profile imported successfully', 'success');
+                } else {
+                    showAlert(`Error: ${result.message}`, 'error');
+                }
+            } catch (err) {
+                showAlert(`Error fetching LinkedIn profile: ${err.message}`, 'error');
+            }
+        }
+
         function clearCV() {
             if (!confirm('Clear all CV data?')) return;
             
@@ -1147,6 +1231,8 @@
             renderSkills();
             renderExperience();
             renderEducation();
+            experienceIndex = 0;
+            educationIndex = 0;
             showAlert('CV cleared', 'success');
         }
 
